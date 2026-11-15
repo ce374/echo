@@ -11,20 +11,28 @@
 
     <color name="transparent">#00000000</color>
 
-
     <color name="red">#ffff0000</color>
     <color name="light_red">#ffff5555</color>
     <color name="dark_red">#ffcc0000</color>
 
+    <!-- Red accent (replaces the old green family so every button that used
+         "green" now uses the red accent, via code). -->
+    <color name="dark_green">#ffb71c1c</color>
+    <color name="green">#ffe53935</color>
+    <color name="slight_green">#ffef5350</color>
+    <color name="light_green">#ffffcdd2</color>
+    <color name="half_green">#80e53935</color>
+    <color name="quarter_green">#40e53935</color>
+
+    <!-- Theme backgrounds. -->
+    <color name="bg_light">#ffeeeeee</color>
+    <color name="bg_dark">#ff1c1c1c</color>
+    <color name="bg_amoled">#ff000000</color>
+
+    <!-- Adaptive launcher icon background. -->
+    <color name="icon_red">#ffe53935</color>
+
     <color name="dark_gold">#ff806600</color>
     <color name="gold">#ffaa8800</color>
     <color name="light_gold">#ffffcc00</color>
-
-    <color name="dark_green">#ff00aa44</color>
-    <color name="green">#ff46d869</color>
-    <color name="slight_green">#ff2aff80</color>
-    <color name="light_green">#ffd5ffe6</color>
-
-    <color name="half_green">#8046d869</color>
-    <color name="quarter_green">#4046d869</color>
 </resources>

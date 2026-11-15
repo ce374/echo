@@ -45,37 +45,40 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:tag="bold"
-            android:text="@string/volume_shortcut_label" />
+            android:text="@string/theme_label" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:gravity="center_vertical"
+            android:layout_marginTop="8dp"
             android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/volume_shortcut_status"
+            <Button
+                android:id="@+id/theme_light"
+                style="@style/Button"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/volume_shortcut_off" />
+                android:text="@string/theme_light" />
 
             <Button
-                android:id="@+id/volume_shortcut_enable"
+                android:id="@+id/theme_dark"
                 style="@style/Button"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="@string/volume_shortcut_enable" />
-        </LinearLayout>
+                android:layout_marginLeft="6dp"
+                android:layout_marginRight="6dp"
+                android:layout_weight="1"
+                android:text="@string/theme_dark" />
 
-        <Switch
-            android:id="@+id/low_battery_switch"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/low_battery_label"
-            android:checked="true" />
+            <Button
+                android:id="@+id/theme_amoled"
+                style="@style/Button"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/theme_amoled" />
+        </LinearLayout>
 
         <View
             android:layout_width="match_parent"
@@ -88,7 +91,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:tag="bold"
-            android:text="@string/timer_label" />
+            android:text="@string/schedule_label" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -97,91 +100,44 @@
             android:orientation="horizontal">
 
             <Button
-                android:id="@+id/timer_off"
+                android:id="@+id/sched_start_btn"
                 style="@style/Button"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/timer_off" />
+                android:text="@string/schedule_start" />
 
             <Button
-                android:id="@+id/timer_5"
+                android:id="@+id/sched_stop_btn"
                 style="@style/Button"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginLeft="6dp"
-                android:layout_marginRight="6dp"
                 android:layout_weight="1"
-                android:text="5" />
-
-            <Button
-                android:id="@+id/timer_10"
-                style="@style/Button"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginLeft="6dp"
-                android:layout_marginRight="6dp"
-                android:layout_weight="1"
-                android:text="10" />
-
-            <Button
-                android:id="@+id/timer_15"
-                style="@style/Button"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="15" />
+                android:text="@string/schedule_stop" />
         </LinearLayout>
 
-        <LinearLayout
+        <Switch
+            android:id="@+id/sched_arm_switch"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:orientation="horizontal">
+            android:layout_marginTop="12dp"
+            android:text="@string/schedule_arm"
+            android:checked="false" />
 
-            <Button
-                android:id="@+id/timer_25"
-                style="@style/Button"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="25" />
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="20dp"
+            android:background="@color/gray_d" />
 
-            <Button
-                android:id="@+id/timer_30"
-                style="@style/Button"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginLeft="6dp"
-                android:layout_marginRight="6dp"
-                android:layout_weight="1"
-                android:text="30" />
-
-            <Button
-                android:id="@+id/timer_45"
-                style="@style/Button"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginLeft="6dp"
-                android:layout_marginRight="6dp"
-                android:layout_weight="1"
-                android:text="45" />
-
-            <Button
-                android:id="@+id/timer_60"
-                style="@style/Button"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="60" />
-        </LinearLayout>
-
-        <TextView
-            style="@style/SmallText"
+        <Switch
+            android:id="@+id/low_battery_switch"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/hard_limit_note" />
+            android:text="@string/low_battery_label"
+            android:checked="true" />
 
         <View
             android:layout_width="match_parent"

@@ -33,6 +33,7 @@ public class SaidItFragment extends Fragment {
 
     private boolean isListening = true;
     private boolean isRecording = false;
+    private boolean autoStarted = false;
 
     private View ready_section;
     private Button recordLastFiveMinutesButton;
@@ -54,6 +55,11 @@ public class SaidItFragment extends Fragment {
             SaidItService.BackgroundRecorderBinder typedBinder = (SaidItService.BackgroundRecorderBinder) binder;
             if (echo != null && echo == typedBinder.getService()) return;
             echo = typedBinder.getService();
+            // Opening the app automatically starts a recording (once per launch).
+            if (!autoStarted) {
+                autoStarted = true;
+                if (!echo.isRecording()) echo.startRecording(0);
+            }
             getView().postOnAnimation(updater);
         }
 
@@ -195,6 +201,13 @@ public class SaidItFragment extends Fragment {
             }
         });
 
+        rootView.findViewById(R.id.library_button).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(getActivity(), LibraryActivity.class));
+            }
+        });
+
         serviceStateCallback.state(isListening, isRecording, 0, 0, 0);
         return rootView;
     }
@@ -305,13 +318,12 @@ public class SaidItFragment extends Fragment {
         final SharedPreferences prefs = getActivity()
                 .getSharedPreferences(SaidIt.PACKAGE_NAME, Context.MODE_PRIVATE);
         final long startMs = prefs.getLong(SaidIt.RECORDING_START_KEY, 0);
-        final int timerMin = prefs.getInt(SaidIt.TIMER_MINUTES_KEY, 0);
         if (!isRecording || startMs <= 0) {
             rec_remaining.setText("");
             return;
         }
-        final long limitMs = (timerMin > 0 ? Math.min(timerMin, SaidIt.MAX_RECORDING_MINUTES)
-                : SaidIt.MAX_RECORDING_MINUTES) * 60_000L;
+        // Countdown to the 70-minute segment boundary (then it auto-saves and continues).
+        final long limitMs = SaidIt.MAX_RECORDING_MINUTES * 60_000L;
         final long remainingMs = (startMs + limitMs) - System.currentTimeMillis();
         if (remainingMs <= 0) {
             rec_remaining.setText(R.string.saving);

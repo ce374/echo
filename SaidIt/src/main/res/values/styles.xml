@@ -1,17 +1,35 @@
 <resources>
 
-    <!-- Base application theme. -->
+    <!-- Theme-aware text colors. -->
+    <attr name="echoTextColor" format="color" />
+    <attr name="echoMutedTextColor" format="color" />
+
+    <!-- Base application theme. Red accent, applied on top by the variants below. -->
     <style name="SaidIt" parent="Theme.AppCompat.Light">
         <item name="android:windowNoTitle">true</item>
-<!--
-        <item name="android:buttonStyle">@style/Button</item>
--->
         <item name="android:textViewStyle">@style/TextView</item>
-        <item name="android:windowBackground">@color/gray_e</item>
+        <item name="android:windowBackground">@color/bg_light</item>
         <item name="android:windowActionBar">false</item>
+        <item name="echoTextColor">@color/gray_0</item>
+        <item name="echoMutedTextColor">@color/gray_8</item>
+    </style>
 
-       <!-- <item name="android:alertDialogTheme">@style/SaidIt.AlertDialogTheme</item>
-        <item name="android:dialogTheme">@style/SaidIt.AlertDialogTheme</item>-->
+    <style name="ThemeLight" parent="SaidIt">
+        <item name="android:windowBackground">@color/bg_light</item>
+        <item name="echoTextColor">@color/gray_0</item>
+        <item name="echoMutedTextColor">@color/gray_8</item>
+    </style>
+
+    <style name="ThemeDark" parent="SaidIt">
+        <item name="android:windowBackground">@color/bg_dark</item>
+        <item name="echoTextColor">@color/gray_e</item>
+        <item name="echoMutedTextColor">@color/gray_a</item>
+    </style>
+
+    <style name="ThemeAmoled" parent="SaidIt">
+        <item name="android:windowBackground">@color/bg_amoled</item>
+        <item name="echoTextColor">@color/gray_f</item>
+        <item name="echoMutedTextColor">@color/gray_a</item>
     </style>
 
     <style name="SaidIt.AlertDialogTheme">
@@ -48,7 +66,8 @@
         <item name="android:textColor">@color/green</item>
     </style>
 
-    <style name="Theme" parent="SaidIt">
+    <!-- Manifest default; activities override with the selected theme. -->
+    <style name="Theme" parent="ThemeLight">
     </style>
 
     <style name="ButtonBase" parent="android:Widget.Holo.Button">
@@ -81,7 +100,7 @@
     </style>
 
     <style name="TextBase" parent="android:Widget.TextView">
-        <item name="android:textColor">@color/gray_0</item>
+        <item name="android:textColor">?attr/echoTextColor</item>
         <item name="android:textSize">@dimen/info_text_size</item>
         <item name="android:gravity">start|center_vertical</item>
     </style>
@@ -94,7 +113,7 @@
     </style>
 
     <style name="SmallText">
-        <item name="android:textColor">@color/gray_8</item>
+        <item name="android:textColor">?attr/echoMutedTextColor</item>
         <item name="android:textSize">@dimen/small_text_size</item>
     </style>
 </resources>

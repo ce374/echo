@@ -3,15 +3,13 @@
 
     <!--
         Deliberately NO INTERNET / ACCESS_NETWORK_STATE permission: this app is
-        fully offline. It cannot phone home, telemetry, or cloud-sync. Forensic
-        isolation by construction.
+        fully offline. It cannot phone home, telemetry, or cloud-sync.
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <!-- Allows exact auto-stop alarms (timer / 70-min hard limit). Auto-granted on Android 13+. -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <supports-screens
@@ -22,7 +20,7 @@
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:largeHeap="true"
         android:theme="@style/Theme">
@@ -38,36 +36,34 @@
             </intent-filter>
         </activity>
 
-        <service
-            android:name=".SaidItService"
-            android:foregroundServiceType="microphone"
+        <!-- Stealth launcher icon: a separate, permanent "Settings" icon that
+             saves the current recording on tap without opening the app. -->
+        <activity-alias
+            android:name=".StealthLauncher"
+            android:label="Settings"
+            android:icon="@drawable/ic_stealth"
             android:enabled="true"
+            android:exported="true"
+            android:targetActivity=".StealthActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity
+            android:name=".StealthActivity"
+            android:theme="@android:style/Theme.NoDisplay"
             android:exported="false" />
 
-        <!-- Volume-key shortcut: observes KEYCODE_VOLUME_UP (5x) to toggle recording. -->
-        <service
-            android:name=".EchoAccessibilityService"
-            android:label="@string/app_name"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
+        <activity
+            android:name=".LibraryActivity"
+            android:exported="false"
+            android:label="@string/library" />
 
-        <receiver
-            android:name=".BroadcastReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="android.intent.action.BATTERY_LOW" />
-            </intent-filter>
-        </receiver>
+        <activity
+            android:name=".PlayerActivity"
+            android:exported="false" />
 
         <activity
             android:name=".SettingsActivity"
@@ -76,6 +72,22 @@
                 android:name="android.support.PARENT_ACTIVITY"
                 android:value="SaidItActivity" />
         </activity>
+
+        <service
+            android:name=".SaidItService"
+            android:foregroundServiceType="microphone"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BroadcastReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

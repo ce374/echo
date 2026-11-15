@@ -34,6 +34,7 @@ public class SaidItActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        setTheme(ThemeHelper.themeId(this));
         super.onCreate(savedInstanceState);
         // Block screenshots, screen recording and casting of this app.
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,

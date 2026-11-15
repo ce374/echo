@@ -1,7 +1,11 @@
 package eu.mrogalski.saidit;
 
 import android.app.Activity;
-import android.content.ComponentName;
+import android.app.AlarmManager;
+import android.app.ComponentName;
+import android.app.FragmentManager;
+import android.app.PendingIntent;
+import android.app.TimePickerDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
@@ -16,32 +20,46 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
-import android.provider.Settings;
+import android.text.format.DateFormat;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.TimePicker;
 
-import androidx.documentfile.provider.DocumentFile;
+import java.util.Calendar;
 
 import eu.mrogalski.StringFormat;
 import eu.mrogalski.android.TimeFormat;
 import eu.mrogalski.android.Views;
 
 public class SettingsActivity extends Activity {
+
     static final String TAG = SettingsActivity.class.getSimpleName();
+    private static final int REQ_SCHED_START = 9201;
+    private static final int REQ_SCHED_STOP = 9202;
+
     private final MemoryOnClickListener memoryClickListener = new MemoryOnClickListener();
     private final QualityOnClickListener qualityClickListener = new QualityOnClickListener();
-    private final TimerOnClickListener timerClickListener = new TimerOnClickListener();
-
     final WorkingDialog dialog = new WorkingDialog();
 
-    private int[] timerButtons;
-    private int[] timerValues;
+    SaidItService service;
+    final ServiceConnection connection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName className, IBinder binder) {
+            service = ((SaidItService.BackgroundRecorderBinder) binder).getService();
+            syncUI();
+        }
+        @Override
+        public void onServiceDisconnected(ComponentName arg0) { service = null; }
+    };
+
+    final TimeFormat.Result timeFormatResult = new TimeFormat.Result();
 
     @Override
     protected void onStart() {
@@ -55,21 +73,114 @@ public class SettingsActivity extends Activity {
         unbindService(connection);
     }
 
-    SaidItService service;
-    final ServiceConnection connection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName className, IBinder binder) {
-            service = ((SaidItService.BackgroundRecorderBinder) binder).getService();
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        setTheme(ThemeHelper.themeId(this));
+        super.onCreate(savedInstanceState);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE);
+
+        final AssetManager assets = getAssets();
+        final Typeface bold = Typeface.createFromAsset(assets, "RobotoCondensedBold.ttf");
+        final Typeface regular = Typeface.createFromAsset(assets, "RobotoCondensed-Regular.ttf");
+
+        final ViewGroup root = (ViewGroup) getLayoutInflater().inflate(R.layout.activity_settings, null);
+        Views.search(root, new Views.SearchViewCallback() {
+            @Override
+            public void onView(View view, ViewGroup parent) {
+                if (view instanceof Button) {
+                    ((Button) view).setTypeface(bold);
+                } else if (view instanceof TextView) {
+                    final String tag = (String) view.getTag();
+                    ((TextView) view).setTypeface("bold".equals(tag) ? bold : regular);
+                }
+            }
+        });
+
+        final LinearLayout settingsLayout = (LinearLayout) root.findViewById(R.id.settings_layout);
+        final FrameLayout frame = new FrameLayout(this) {
+            @Override
+            protected boolean fitSystemWindows(Rect insets) {
+                settingsLayout.setPadding(insets.left, insets.top, insets.right, insets.bottom);
+                return true;
+            }
+        };
+        frame.addView(root);
+
+        root.findViewById(R.id.settings_return).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { finish(); }
+        });
+
+        root.findViewById(R.id.memory_low).setOnClickListener(memoryClickListener);
+        root.findViewById(R.id.memory_medium).setOnClickListener(memoryClickListener);
+        root.findViewById(R.id.memory_high).setOnClickListener(memoryClickListener);
+
+        initSampleRateButton(root, R.id.quality_8kHz, 8000, 11025);
+        initSampleRateButton(root, R.id.quality_16kHz, 16000, 22050);
+        initSampleRateButton(root, R.id.quality_48kHz, 48000, 44100);
+
+        root.findViewById(R.id.storage_pick).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Storage.openTreePicker(SettingsActivity.this); }
+        });
+
+        // Theme buttons.
+        root.findViewById(R.id.theme_light).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { ThemeHelper.set(SettingsActivity.this, ThemeHelper.LIGHT); recreate(); }
+        });
+        root.findViewById(R.id.theme_dark).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { ThemeHelper.set(SettingsActivity.this, ThemeHelper.DARK); recreate(); }
+        });
+        root.findViewById(R.id.theme_amoled).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { ThemeHelper.set(SettingsActivity.this, ThemeHelper.AMOLED); recreate(); }
+        });
+
+        // Schedule pickers.
+        root.findViewById(R.id.sched_start_btn).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { pickTime(true); }
+        });
+        root.findViewById(R.id.sched_stop_btn).setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { pickTime(false); }
+        });
+
+        final Switch arm = (Switch) root.findViewById(R.id.sched_arm_switch);
+        arm.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                if (checked) armSchedule(); else disarmSchedule();
+                updateScheduleLabels();
+            }
+        });
+
+        // Low-battery auto-save.
+        final Switch low = (Switch) root.findViewById(R.id.low_battery_switch);
+        low.setChecked(getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE)
+                .getBoolean(SaidIt.LOW_BATTERY_AUTOSAVE_KEY, true));
+        low.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton b, boolean checked) {
+                getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE)
+                        .edit().putBoolean(SaidIt.LOW_BATTERY_AUTOSAVE_KEY, checked).commit();
+            }
+        });
+
+        dialog.setDescriptionStringId(R.string.work_preparing_memory);
+        setContentView(frame);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        syncUI();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == Storage.REQUEST_CODE_OPEN_TREE) {
+            if (resultCode == RESULT_OK) Storage.takeTreeUri(this, data);
             syncUI();
         }
-
-        @Override
-        public void onServiceDisconnected(ComponentName arg0) {
-            service = null;
-        }
-    };
-
-    final TimeFormat.Result timeFormatResult = new TimeFormat.Result();
+    }
 
     private void syncUI() {
         final long maxMemory = Runtime.getRuntime().maxMemory();
@@ -84,16 +195,24 @@ public class SettingsActivity extends Activity {
         }
         highlightButtons();
         updateFolderDisplay();
-        updateTimerHighlight();
+        updateThemeHighlight();
+        updateScheduleLabels();
         updateLowBatterySwitch();
-        updateAccessibilityStatus();
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // The user may have just enabled/disabled the accessibility service.
-        updateAccessibilityStatus();
+    private void updateFolderDisplay() {
+        TextView tv = (TextView) findViewById(R.id.storage_path);
+        Uri tree = Storage.getTreeUri(this);
+        if (tree == null) { tv.setText(R.string.folder_not_set); return; }
+        String name = tree.getLastPathSegment();
+        tv.setText(name != null ? name : tree.toString());
+    }
+
+    private void updateThemeHighlight() {
+        int t = ThemeHelper.current(this);
+        findViewById(R.id.theme_light).setBackgroundResource(t == ThemeHelper.LIGHT ? R.drawable.green_button : R.drawable.gray_button);
+        findViewById(R.id.theme_dark).setBackgroundResource(t == ThemeHelper.DARK ? R.drawable.green_button : R.drawable.gray_button);
+        findViewById(R.id.theme_amoled).setBackgroundResource(t == ThemeHelper.AMOLED ? R.drawable.green_button : R.drawable.gray_button);
     }
 
     private void updateLowBatterySwitch() {
@@ -104,28 +223,114 @@ public class SettingsActivity extends Activity {
         if (sw.isChecked() != on) sw.setChecked(on);
     }
 
-    static boolean isAccessibilityEnabled(Context context) {
-        String enabled = Settings.Secure.getString(context.getContentResolver(),
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        return enabled != null
-                && enabled.contains(EchoAccessibilityService.class.getName());
+    // ---- Schedule ----
+
+    private void updateScheduleLabels() {
+        SharedPreferences p = getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE);
+        int sh = p.getInt(SaidIt.SCHED_START_HOUR_KEY, SaidIt.SCHED_DISABLED);
+        int sm = p.getInt(SaidIt.SCHED_START_MIN_KEY, 0);
+        int eh = p.getInt(SaidIt.SCHED_STOP_HOUR_KEY, SaidIt.SCHED_DISABLED);
+        int em = p.getInt(SaidIt.SCHED_STOP_MIN_KEY, 0);
+        ((Button) findViewById(R.id.sched_start_btn))
+                .setText(sh < 0 ? getString(R.string.schedule_start) : formatHm(sh, sm));
+        ((Button) findViewById(R.id.sched_stop_btn))
+                .setText(eh < 0 ? getString(R.string.schedule_stop) : formatHm(eh, em));
+        Switch arm = (Switch) findViewById(R.id.sched_arm_switch);
+        boolean armed = p.getBoolean(SaidIt.SCHED_ARMED_KEY, false);
+        if (arm.isChecked() != armed) arm.setChecked(armed);
     }
 
-    private void updateAccessibilityStatus() {
-        TextView tv = (TextView) findViewById(R.id.volume_shortcut_status);
-        if (tv == null) return;
-        tv.setText(isAccessibilityEnabled(this) ? R.string.volume_shortcut_on
-                : R.string.volume_shortcut_off);
+    private String formatHm(int hour, int min) {
+        Calendar c = Calendar.getInstance();
+        c.set(Calendar.HOUR_OF_DAY, hour);
+        c.set(Calendar.MINUTE, min);
+        return (String) DateFormat.format("h:mm aa", c);
     }
+
+    private void pickTime(final boolean start) {
+        final SharedPreferences p = getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE);
+        int h = p.getInt(start ? SaidIt.SCHED_START_HOUR_KEY : SaidIt.SCHED_STOP_HOUR_KEY, 8);
+        int m = p.getInt(start ? SaidIt.SCHED_START_MIN_KEY : SaidIt.SCHED_STOP_MIN_KEY, 0);
+        TimePickerDialog d = new TimePickerDialog(this, new TimePickerDialog.OnTimeSetListener() {
+            @Override
+            public void onTimeSet(TimePicker view, int hourOfDay, int minute) {
+                SharedPreferences.Editor e = p.edit();
+                e.putInt(start ? SaidIt.SCHED_START_HOUR_KEY : SaidIt.SCHED_STOP_HOUR_KEY, hourOfDay);
+                e.putInt(start ? SaidIt.SCHED_START_MIN_KEY : SaidIt.SCHED_STOP_MIN_KEY, minute);
+                e.commit();
+                if (p.getBoolean(SaidIt.SCHED_ARMED_KEY, false)) armSchedule(); // re-arm with new times
+                updateScheduleLabels();
+            }
+        }, h, m, false /* 12-hour with AM/PM */);
+        d.show();
+    }
+
+    private void armSchedule() {
+        SharedPreferences p = getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE);
+        int sh = p.getInt(SaidIt.SCHED_START_HOUR_KEY, SaidIt.SCHED_DISABLED);
+        int eh = p.getInt(SaidIt.SCHED_STOP_HOUR_KEY, SaidIt.SCHED_DISABLED);
+        if (sh < 0 || eh < 0) {
+            // Need both times; un-arm.
+            p.edit().putBoolean(SaidIt.SCHED_ARMED_KEY, false).commit();
+            return;
+        }
+        int sm = p.getInt(SaidIt.SCHED_START_MIN_KEY, 0);
+        int em = p.getInt(SaidIt.SCHED_STOP_MIN_KEY, 0);
+        long startTrig = nextOccurrence(sh, sm);
+        long stopTrig = nextOccurrence(eh, em);
+        if (stopTrig <= startTrig) stopTrig += 24L * 3600_000L;
+        setAlarm(SaidIt.ACTION_SCHEDULED_START, startTrig, REQ_SCHED_START);
+        setAlarm(SaidIt.ACTION_SCHEDULED_STOP, stopTrig, REQ_SCHED_STOP);
+        p.edit().putBoolean(SaidIt.SCHED_ARMED_KEY, true).commit();
+    }
+
+    private void disarmSchedule() {
+        cancelAlarm(SaidIt.ACTION_SCHEDULED_START, REQ_SCHED_START);
+        cancelAlarm(SaidIt.ACTION_SCHEDULED_STOP, REQ_SCHED_STOP);
+        getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE)
+                .edit().putBoolean(SaidIt.SCHED_ARMED_KEY, false).commit();
+    }
+
+    private static long nextOccurrence(int hour, int min) {
+        Calendar c = Calendar.getInstance();
+        c.set(Calendar.HOUR_OF_DAY, hour);
+        c.set(Calendar.MINUTE, min);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        if (c.getTimeInMillis() <= System.currentTimeMillis()) c.add(Calendar.DAY_OF_YEAR, 1);
+        return c.getTimeInMillis();
+    }
+
+    private void setAlarm(String action, long at, int reqCode) {
+        Intent i = new Intent(this, SaidItService.class).setAction(action);
+        PendingIntent pi = PendingIntent.getService(this, reqCode, i,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        try {
+            ((AlarmManager) getSystemService(ALARM_SERVICE))
+                    .setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
+        } catch (SecurityException e) {
+            android.util.Log.e(TAG, "setAlarm failed", e);
+        }
+    }
+
+    private void cancelAlarm(String action, int reqCode) {
+        Intent i = new Intent(this, SaidItService.class).setAction(action);
+        PendingIntent pi = PendingIntent.getService(this, reqCode, i,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        try {
+            ((AlarmManager) getSystemService(ALARM_SERVICE)).cancel(pi);
+        } catch (Exception ignored) {}
+    }
+
+    // ---- Memory / quality ----
 
     void highlightButtons() {
         if (service == null) return;
         final long maxMemory = Runtime.getRuntime().maxMemory();
         int button = (int) (service.getMemorySize() / (maxMemory / 4));
         highlightButton(R.id.memory_low, R.id.memory_medium, R.id.memory_high, button);
-
-        int samplingRate = service.getSamplingRate();
-        button = samplingRate >= 44100 ? 3 : samplingRate >= 16000 ? 2 : 1;
+        int sr = service.getSamplingRate();
+        button = sr >= 44100 ? 3 : sr >= 16000 ? 2 : 1;
         highlightButton(R.id.quality_8kHz, R.id.quality_16kHz, R.id.quality_48kHz, button);
     }
 
@@ -133,133 +338,6 @@ public class SettingsActivity extends Activity {
         findViewById(b1).setBackgroundResource(1 == i ? R.drawable.green_button : R.drawable.gray_button);
         findViewById(b2).setBackgroundResource(2 == i ? R.drawable.green_button : R.drawable.gray_button);
         findViewById(b3).setBackgroundResource(3 == i ? R.drawable.green_button : R.drawable.gray_button);
-    }
-
-    private void updateFolderDisplay() {
-        TextView tv = (TextView) findViewById(R.id.storage_path);
-        Uri tree = Storage.getTreeUri(this);
-        if (tree == null) {
-            tv.setText(R.string.folder_not_set);
-        } else {
-            DocumentFile df = DocumentFile.fromTreeUri(this, tree);
-            String name = df != null ? df.getName() : tree.getLastPathSegment();
-            tv.setText(name != null ? name : tree.toString());
-        }
-    }
-
-    private void updateTimerHighlight() {
-        SharedPreferences prefs = getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE);
-        int current = prefs.getInt(SaidIt.TIMER_MINUTES_KEY, 0);
-        for (int i = 0; i < timerValues.length; i++) {
-            findViewById(timerButtons[i]).setBackgroundResource(
-                    current == timerValues[i] ? R.drawable.green_button : R.drawable.gray_button);
-        }
-    }
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        // Block screenshots, screen recording and casting of this app.
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
-                WindowManager.LayoutParams.FLAG_SECURE);
-
-        final AssetManager assets = getAssets();
-        final Resources resources = getResources();
-        final float density = resources.getDisplayMetrics().density;
-
-        final Typeface robotoCondensedBold = Typeface.createFromAsset(assets, "RobotoCondensedBold.ttf");
-        final Typeface robotoCondensedRegular = Typeface.createFromAsset(assets, "RobotoCondensed-Regular.ttf");
-
-        final ViewGroup root = (ViewGroup) getLayoutInflater().inflate(R.layout.activity_settings, null);
-        Views.search(root, new Views.SearchViewCallback() {
-            @Override
-            public void onView(View view, ViewGroup parent) {
-                if (view instanceof Button) {
-                    ((Button) view).setTypeface(robotoCondensedBold);
-                } else if (view instanceof TextView) {
-                    final String tag = (String) view.getTag();
-                    final TextView textView = (TextView) view;
-                    textView.setTypeface("bold".equals(tag) ? robotoCondensedBold : robotoCondensedRegular);
-                }
-            }
-        });
-
-        root.findViewById(R.id.settings_return).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                finish();
-            }
-        });
-
-        final LinearLayout settingsLayout = (LinearLayout) root.findViewById(R.id.settings_layout);
-        final FrameLayout myFrameLayout = new FrameLayout(this) {
-            @Override
-            protected boolean fitSystemWindows(Rect insets) {
-                settingsLayout.setPadding(insets.left, insets.top, insets.right, insets.bottom);
-                return true;
-            }
-        };
-        myFrameLayout.addView(root);
-
-        root.findViewById(R.id.memory_low).setOnClickListener(memoryClickListener);
-        root.findViewById(R.id.memory_medium).setOnClickListener(memoryClickListener);
-        root.findViewById(R.id.memory_high).setOnClickListener(memoryClickListener);
-
-        initSampleRateButton(root, R.id.quality_8kHz, 8000, 11025);
-        initSampleRateButton(root, R.id.quality_16kHz, 16000, 22050);
-        initSampleRateButton(root, R.id.quality_48kHz, 48000, 44100);
-
-        // Timer option buttons.
-        timerButtons = new int[]{
-                R.id.timer_off, R.id.timer_5, R.id.timer_10, R.id.timer_15,
-                R.id.timer_25, R.id.timer_30, R.id.timer_45, R.id.timer_60
-        };
-        timerValues = new int[]{0, 5, 10, 15, 25, 30, 45, 60};
-        for (int id : timerButtons) {
-            root.findViewById(id).setOnClickListener(timerClickListener);
-        }
-
-        root.findViewById(R.id.storage_pick).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Storage.openTreePicker(SettingsActivity.this);
-            }
-        });
-
-        // Low-battery auto-save toggle.
-        final Switch lowBattery = (Switch) root.findViewById(R.id.low_battery_switch);
-        lowBattery.setChecked(getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE)
-                .getBoolean(SaidIt.LOW_BATTERY_AUTOSAVE_KEY, true));
-        lowBattery.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(android.widget.CompoundButton button, boolean isChecked) {
-                getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE)
-                        .edit().putBoolean(SaidIt.LOW_BATTERY_AUTOSAVE_KEY, isChecked).commit();
-            }
-        });
-
-        // Volume-key shortcut: open system Accessibility settings to enable the service.
-        root.findViewById(R.id.volume_shortcut_enable).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
-            }
-        });
-
-        dialog.setDescriptionStringId(R.string.work_preparing_memory);
-
-        setContentView(myFrameLayout);
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == Storage.REQUEST_CODE_OPEN_TREE) {
-            if (resultCode == RESULT_OK) {
-                Storage.takeTreeUri(this, data);
-            }
-            updateFolderDisplay();
-        }
     }
 
     private void initSampleRateButton(ViewGroup layout, int buttonId, int primary, int secondary) {
@@ -288,13 +366,11 @@ public class SettingsActivity extends Activity {
             final long memory = getMultiplier(v) * Runtime.getRuntime().maxMemory() / 4;
             dialog.show(getFragmentManager(), "Preparing memory");
             new Handler().post(new Runnable() {
-                @Override
-                public void run() {
+                @Override public void run() {
                     service.setMemorySize(memory);
                     service.getState(new SaidItService.StateCallback() {
                         @Override
-                        public void state(boolean listeningEnabled, boolean recording, float memorized,
-                                          float totalMemory, float recorded) {
+                        public void state(boolean le, boolean r, float m, float t, float rec) {
                             syncUI();
                             if (dialog.isVisible()) dialog.dismiss();
                         }
@@ -302,7 +378,6 @@ public class SettingsActivity extends Activity {
                 }
             });
         }
-
         private int getMultiplier(View button) {
             switch (button.getId()) {
                 case R.id.memory_high: return 3;
@@ -320,13 +395,11 @@ public class SettingsActivity extends Activity {
             final int sampleRate = getSampleRate(v);
             dialog.show(getFragmentManager(), "Preparing memory");
             new Handler().post(new Runnable() {
-                @Override
-                public void run() {
+                @Override public void run() {
                     service.setSampleRate(sampleRate);
                     service.getState(new SaidItService.StateCallback() {
                         @Override
-                        public void state(boolean listeningEnabled, boolean recording, float memorized,
-                                          float totalMemory, float recorded) {
+                        public void state(boolean le, boolean r, float m, float t, float rec) {
                             syncUI();
                             if (dialog.isVisible()) dialog.dismiss();
                         }
@@ -334,24 +407,9 @@ public class SettingsActivity extends Activity {
                 }
             });
         }
-
         private int getSampleRate(View button) {
             Object tag = button.getTag();
             return tag instanceof Integer ? (Integer) tag : 8000;
-        }
-    }
-
-    private class TimerOnClickListener implements View.OnClickListener {
-        @Override
-        public void onClick(View v) {
-            int idx = -1;
-            for (int i = 0; i < timerButtons.length; i++) {
-                if (timerButtons[i] == v.getId()) { idx = i; break; }
-            }
-            if (idx < 0) return;
-            getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE)
-                    .edit().putInt(SaidIt.TIMER_MINUTES_KEY, timerValues[idx]).commit();
-            updateTimerHighlight();
         }
     }
 }

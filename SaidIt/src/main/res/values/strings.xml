@@ -34,45 +34,67 @@
     <string name="record_6_hrs">6 Hrs</string>
     <string name="record_all_memory">All</string>
     <string name="settings">Settings</string>
+    <string name="library">Library</string>
 
     <!-- Dialogs -->
     <string name="work_default">Working</string>
     <string name="work_preparing_memory">Preparing memory</string>
     <string name="allow">Allow</string>
     <string name="exit">Exit</string>
+    <string name="cancel">Cancel</string>
 
     <!-- Permissions / folder -->
     <string name="permission_required">Permission required</string>
     <string name="permission_required_message">Echo app requires permission to record and save audio. Please enable it in the settings.</string>
-    <string name="folder_required">Select a folder</string>
-    <string name="folder_required_message">Pick a folder where recordings will be saved.</string>
     <string name="pick_folder_to_save">Select a save folder in Settings.</string>
     <string name="folder_not_set">Not set</string>
 
     <!-- Settings -->
     <string name="settings_return">Return</string>
     <string name="storage_label">Folder</string>
+    <string name="storage_pick">Change</string>
     <string name="option_a_used_ram">Memory</string>
     <string name="option_b_audio_quality">Quality</string>
-    <string name="storage_pick">Change</string>
-    <string name="timer_label">Auto-save timer</string>
-    <string name="timer_off">Off</string>
-    <string name="hard_limit_note">Max 70 min</string>
 
-    <!-- Volume-key shortcut / accessibility -->
-    <string name="volume_shortcut_label">Volume-key shortcut</string>
-    <string name="volume_shortcut_status">Off</string>
-    <string name="volume_shortcut_on">On</string>
-    <string name="volume_shortcut_off">Off</string>
-    <string name="volume_shortcut_enable">Enable</string>
-    <string name="accessibility_description">Press volume-up 5 times to start or stop a recording. Echo observes the key but does not change the volume.</string>
+    <!-- Theme -->
+    <string name="theme_label">Theme</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_amoled">Amoled</string>
 
-    <!-- Low-battery auto-save -->
-    <string name="low_battery_label">Low-battery auto-save</string>
+    <!-- Schedule -->
+    <string name="schedule_label">Schedule</string>
+    <string name="schedule_start">Start</string>
+    <string name="schedule_stop">Stop</string>
+    <string name="schedule_arm">Arm</string>
+
+    <!-- Low-battery -->
+    <string name="low_battery_label">Auto-save at low battery</string>
 
     <!-- Storage -->
     <string name="storage_full">Storage full</string>
     <string name="storage_error_saved">Storage error — recording saved.</string>
     <string name="recovered_recording_saved">Recovered recording from previous session.</string>
+
+    <!-- Library -->
+    <string name="search_hint">Search name, description, notes…</string>
+    <string name="library_empty">No recordings yet</string>
+    <string name="library_scan_failed">Could not scan folder</string>
+
+    <!-- Player -->
+    <string name="player_name">Name</string>
+    <string name="player_description">Description</string>
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_add_note">+ Note</string>
+    <string name="player_add">Add</string>
+    <string name="player_save">Save</string>
+    <string name="player_saved">Saved</string>
+    <string name="player_export">Export MD</string>
+    <string name="player_exported">Exported to trace/</string>
+    <string name="player_export_failed">Export failed</string>
+    <string name="player_no_file">No recording selected</string>
+    <string name="player_file_missing">Recording file not found</string>
+    <string name="player_bookmarks">Bookmarks</string>
 
 </resources>
