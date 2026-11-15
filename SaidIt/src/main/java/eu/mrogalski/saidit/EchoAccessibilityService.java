@@ -74,7 +74,7 @@ public class EchoAccessibilityService extends AccessibilityService {
                 handler.removeCallbacks(reset);
                 Log.d(TAG, "5x volume-up -> toggle");
                 try {
-                    Intent i = new Intent(this, SaidItService.class).setAction(ACTION_TOGGLE);
+                    Intent i = new Intent(this, SaidItService.class).setAction(SaidIt.ACTION_TOGGLE);
                     if (android.os.Build.VERSION.SDK_INT >= 26) {
                         startForegroundService(i);
                     } else {
