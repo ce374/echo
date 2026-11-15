@@ -5,9 +5,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Allows exact auto-stop alarms (timer / 70-min hard limit). Auto-granted on Android 13+. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <supports-screens
         android:largeScreens="true"
@@ -18,7 +19,8 @@
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:largeHeap="true"
-        android:theme="@style/Theme" >
+        android:theme="@style/Theme">
+
         <activity
             android:name=".SaidItActivity"
             android:label="@string/app_name"
@@ -27,39 +29,27 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="echoLicense"/>
-            </intent-filter>
-
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="echoCoupon"/>
-            </intent-filter>
         </activity>
 
         <service
             android:name=".SaidItService"
             android:foregroundServiceType="microphone"
             android:enabled="true"
-            android:exported="false">
-        </service>
+            android:exported="false" />
 
-        <receiver android:name=".BroadcastReceiver"
+        <receiver
+            android:name=".BroadcastReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
         <activity
             android:name=".SettingsActivity"
-            android:parentActivityName=".SaidItActivity" >
+            android:parentActivityName=".SaidItActivity">
             <meta-data
                 android:name="android.support.PARENT_ACTIVITY"
                 android:value="SaidItActivity" />
@@ -72,9 +62,7 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/path_provider">
-
-            </meta-data>
+                android:resource="@xml/path_provider" />
         </provider>
     </application>
 

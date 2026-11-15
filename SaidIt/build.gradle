@@ -2,7 +2,6 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-        maven { url "https://repo.maven.apache.org/maven2" }
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.10.1'
@@ -11,28 +10,38 @@ buildscript {
 apply plugin: 'com.android.application'
 
 repositories {
-        mavenCentral()
-        maven { url "https://maven.google.com" }
+    mavenCentral()
+    google()
 }
+
+// Read optional signing config from local.properties (CI keystore pattern).
+Properties localProps = new Properties()
+File localPropsFile = rootProject.file('local.properties')
+if (localPropsFile.exists()) {
+    localProps.load(new FileInputStream(localPropsFile))
+}
+def hasSigning = localProps.getProperty('signingConfig.storeFile') != null
 
 android {
     namespace 'eu.mrogalski.saidit'
     compileSdk 34
 
-    defaultConfig{
+    defaultConfig {
         applicationId "eu.mrogalski.saidit"
         minSdk 30
         targetSdk 34
-        versionCode 15
-        versionName "2.0.0"
+        versionCode 16
+        versionName "2.1.0"
     }
 
     signingConfigs {
         release {
-            storeFile file("<relative path>")
-            storePassword "<fill in>"
-            keyAlias "<fill in>"
-            keyPassword "<fill in>"
+            if (hasSigning) {
+                storeFile rootProject.file(localProps.getProperty('signingConfig.storeFile'))
+                storePassword localProps.getProperty('signingConfig.storePassword')
+                keyAlias localProps.getProperty('signingConfig.keyAlias')
+                keyPassword localProps.getProperty('signingConfig.keyPassword')
+            }
         }
     }
 
@@ -41,12 +50,11 @@ android {
             minifyEnabled true
             proguardFile file('proguard.cfg')
             proguardFile getDefaultProguardFile('proguard-android-optimize.txt')
-            signingConfig signingConfigs.release
+            if (hasSigning) {
+                signingConfig signingConfigs.release
+            }
         }
-
-        debug {
-            //signingConfig signingConfigs.release
-        }
+        debug {}
     }
     lint {
         abortOnError false
@@ -54,10 +62,10 @@ android {
     buildFeatures {
         buildConfig true
     }
-
 }
 
 dependencies {
     implementation fileTree(dir: 'libs', include: '*.jar')
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.documentfile:documentfile:1.0.1'
 }

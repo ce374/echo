@@ -15,35 +15,36 @@ import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaRecorder;
+import android.net.Uri;
 import android.os.Binder;
-import android.os.Build;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
-import android.os.Looper;
 import android.os.SystemClock;
-import androidx.core.app.NotificationCompat;
-import android.text.format.DateUtils;
 import android.util.Log;
 import android.widget.Toast;
+
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 
 import java.io.File;
 import java.io.IOException;
 
 import simplesound.pcm.WavAudioFormat;
 import simplesound.pcm.WavFileWriter;
-import static eu.mrogalski.saidit.SaidIt.*;
 
 public class SaidItService extends Service {
     static final String TAG = SaidItService.class.getSimpleName();
     private static final int FOREGROUND_NOTIFICATION_ID = 458;
-    private static final String YOUR_NOTIFICATION_CHANNEL_ID = "SaidItServiceChannel";
+    private static final int SAVED_NOTIFICATION_ID = 43;
+    private static final String CHANNEL_ID = "SaidItServiceChannel";
+    private static final String CHANNEL_ID_SAVED = "SaidItSavedChannel";
+    private static final int AUTO_STOP_REQUEST_CODE = 9101;
 
     volatile int SAMPLE_RATE;
     volatile int FILL_RATE;
 
-
+    /** Temp WAV written while recording; copied to SAF on stop. */
     File wavFile;
     AudioRecord audioRecord; // used only in the audio thread
     WavFileWriter wavFileWriter; // used only in the audio thread
@@ -51,31 +52,42 @@ public class SaidItService extends Service {
 
     HandlerThread audioThread;
     Handler audioHandler; // used to post messages to audio thread
+    Handler mainHandler;
+
+    VolumeKeyMonitor volumeMonitor;
 
     @Override
     public void onCreate() {
-
-        Log.d(TAG, "Reading native sample rate");
+        Log.d(TAG, "onCreate");
 
         final SharedPreferences preferences = this.getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE);
-        SAMPLE_RATE = preferences.getInt(SAMPLE_RATE_KEY, AudioTrack.getNativeOutputSampleRate (AudioManager.STREAM_MUSIC));
+        SAMPLE_RATE = preferences.getInt(SAMPLE_RATE_KEY, AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC));
         Log.d(TAG, "Sample rate: " + SAMPLE_RATE);
         FILL_RATE = 2 * SAMPLE_RATE;
 
         audioThread = new HandlerThread("audioThread", Thread.MAX_PRIORITY);
         audioThread.start();
         audioHandler = new Handler(audioThread.getLooper());
+        mainHandler = new Handler(getMainLooper());
 
-        if(preferences.getBoolean(AUDIO_MEMORY_ENABLED_KEY, true)) {
+        volumeMonitor = new VolumeKeyMonitor(this, new VolumeKeyMonitor.Trigger() {
+            @Override
+            public void onVolumeShortcut() {
+                toggleRecording();
+            }
+        });
+
+        if (preferences.getBoolean(AUDIO_MEMORY_ENABLED_KEY, true)) {
             innerStartListening();
         }
-
     }
 
     @Override
     public void onDestroy() {
-        stopRecording(null, "");
+        if (volumeMonitor != null) volumeMonitor.stop();
+        stopRecording();
         innerStopListening();
+        cancelAutoStop();
         stopForeground(true);
     }
 
@@ -92,25 +104,22 @@ public class SaidItService extends Service {
     public void enableListening() {
         getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE)
                 .edit().putBoolean(AUDIO_MEMORY_ENABLED_KEY, true).commit();
-
         innerStartListening();
     }
 
     public void disableListening() {
         getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE)
                 .edit().putBoolean(AUDIO_MEMORY_ENABLED_KEY, false).commit();
-
         innerStopListening();
     }
 
     int state;
-
     static final int STATE_READY = 0;
     static final int STATE_LISTENING = 1;
     static final int STATE_RECORDING = 2;
 
     private void innerStartListening() {
-        switch(state) {
+        switch (state) {
             case STATE_READY:
                 break;
             case STATE_LISTENING:
@@ -120,26 +129,24 @@ public class SaidItService extends Service {
         state = STATE_LISTENING;
 
         Log.d(TAG, "Queueing: START LISTENING");
-
         startService(new Intent(this, this.getClass()));
 
-        final long memorySize = getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE).getLong(AUDIO_MEMORY_SIZE_KEY, Runtime.getRuntime().maxMemory() / 4);
+        final long memorySize = getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE)
+                .getLong(AUDIO_MEMORY_SIZE_KEY, Runtime.getRuntime().maxMemory() / 4);
 
         audioHandler.post(new Runnable() {
             @SuppressLint("MissingPermission")
             @Override
             public void run() {
                 Log.d(TAG, "Executing: START LISTENING");
-                Log.d(TAG, "Audio: INITIALIZING AUDIO_RECORD");
-
                 audioRecord = new AudioRecord(
-                       MediaRecorder.AudioSource.MIC,
-                       SAMPLE_RATE,
-                       AudioFormat.CHANNEL_IN_MONO,
-                       AudioFormat.ENCODING_PCM_16BIT,
-                       AudioMemory.CHUNK_SIZE);
+                        MediaRecorder.AudioSource.MIC,
+                        SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        AudioMemory.CHUNK_SIZE);
 
-                if(audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+                if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
                     Log.e(TAG, "Audio: INITIALIZATION ERROR - releasing resources");
                     audioRecord.release();
                     audioRecord = null;
@@ -147,20 +154,15 @@ public class SaidItService extends Service {
                     return;
                 }
 
-                Log.d(TAG, "Audio: STARTING AudioRecord");
                 audioMemory.allocate(memorySize);
-
-                Log.d(TAG, "Audio: STARTING AudioRecord");
                 audioRecord.startRecording();
                 audioHandler.post(audioReader);
             }
         });
-
-
     }
 
     private void innerStopListening() {
-        switch(state) {
+        switch (state) {
             case STATE_READY:
             case STATE_RECORDING:
                 return;
@@ -177,99 +179,30 @@ public class SaidItService extends Service {
             @Override
             public void run() {
                 Log.d(TAG, "Executing: STOP LISTENING");
-                if(audioRecord != null)
-                    audioRecord.release();
+                if (audioRecord != null) audioRecord.release();
                 audioHandler.removeCallbacks(audioReader);
                 audioMemory.allocate(0);
             }
         });
-
     }
 
-    public void dumpRecording(final float memorySeconds, final WavFileReceiver wavFileReceiver, String newFileName) {
-        if(state != STATE_LISTENING) throw new IllegalStateException("Not listening!");
-
-        audioHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                flushAudioRecord();
-                int prependBytes = (int)(memorySeconds * FILL_RATE);
-                int bytesAvailable = audioMemory.countFilled();
-
-                int skipBytes = Math.max(0, bytesAvailable - prependBytes);
-
-                int useBytes = bytesAvailable - skipBytes;
-                long millis  = System.currentTimeMillis() - 1000 * useBytes / FILL_RATE;
-                final int flags = DateUtils.FORMAT_SHOW_TIME | DateUtils.FORMAT_SHOW_WEEKDAY | DateUtils.FORMAT_SHOW_DATE;
-                final String dateTime = DateUtils.formatDateTime(SaidItService.this, millis, flags);
-                String filename = "Echo - " + dateTime + ".wav";
-                if(!newFileName.equals("")){
-                    filename = newFileName + ".wav";
-                }
-
-                File storageDir;
-                if(isExternalStorageWritable()){
-                    // Use public storage directory for Android 11+ (min SDK 30)
-                    storageDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Echo");
-                }else{
-                    storageDir = new File(getFilesDir(), "Echo");
-                }
-
-                if(!storageDir.exists()){
-                    storageDir.mkdir();
-                }
-                File file = new File(storageDir, filename);
-
-                // Create the file if it doesn't exist
-                if (!file.exists()) {
-                    try {
-                        if (!file.createNewFile()) {
-                            // Handle file creation failure
-                            throw new IOException("Failed to create file");
-                        }
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                        // Handle IOException
-                        showToast(getString(R.string.cant_create_file) + file.getAbsolutePath());
-                    }
-                }
-                final WavAudioFormat format = new WavAudioFormat.Builder().sampleRate(SAMPLE_RATE).build();
-                try (WavFileWriter writer = new WavFileWriter(format, file)) {
-                    try {
-                        audioMemory.read(skipBytes, new AudioMemory.Consumer() {
-                            @Override
-                            public int consume(byte[] array, int offset, int count) throws IOException {
-                                writer.write(array, offset, count);
-                                return 0;
-                            }
-                        });
-                    } catch (IOException e) {
-                        // Handle error during file writing
-                        showToast(getString(R.string.error_during_writing_history_into) + file.getAbsolutePath());
-                        Log.e(TAG, "Error during writing history into " + file.getAbsolutePath(), e);
-                    }
-                    if (wavFileReceiver != null) {
-                        wavFileReceiver.fileReady(file, writer.getTotalSampleBytesWritten() * getBytesToSeconds());
-                    }
-                } catch (IOException e) {
-                    // Handle error during file creation or closing writer
-                    showToast(getString(R.string.cant_create_file) + file.getAbsolutePath());
-                    Log.e(TAG, "Can't create file " + file.getAbsolutePath(), e);
-                }
-            }
-        });
-
-    }
-    private static boolean isExternalStorageWritable() {
-        String state = Environment.getExternalStorageState();
-        return Environment.MEDIA_MOUNTED.equals(state);
-    }
-    private void showToast(String message) {
-        Toast.makeText(SaidItService.this, message, Toast.LENGTH_LONG).show();
+    /** Folder for the in-progress temp WAV file (internal storage, no permission needed). */
+    private File tempDir() {
+        File dir = new File(getFilesDir(), "Echo");
+        if (!dir.exists()) dir.mkdir();
+        return dir;
     }
 
+    private File newTempFile() {
+        return new File(tempDir(), "echo_recording.wav");
+    }
+
+    /**
+     * Starts a continuous recording, optionally prepending the last {@code prependedMemorySeconds}
+     * from the ring buffer. Output goes to a temp file; on stop it is copied to the SAF folder.
+     */
     public void startRecording(final float prependedMemorySeconds) {
-        switch(state) {
+        switch (state) {
             case STATE_READY:
                 innerStartListening();
                 break;
@@ -280,53 +213,44 @@ public class SaidItService extends Service {
         }
         state = STATE_RECORDING;
 
+        final long startMs = System.currentTimeMillis();
+        final SharedPreferences prefs = getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE);
+        prefs.edit()
+                .putBoolean(RECORDING_ACTIVE_KEY, true)
+                .putLong(RECORDING_START_KEY, startMs)
+                .commit();
+
+        scheduleAutoStop(startMs, prefs.getInt(TIMER_MINUTES_KEY, 0));
+
         audioHandler.post(new Runnable() {
             @Override
             public void run() {
                 flushAudioRecord();
-                int prependBytes = (int)(prependedMemorySeconds * FILL_RATE);
+                int prependBytes = (int) (prependedMemorySeconds * FILL_RATE);
                 int bytesAvailable = audioMemory.countFilled();
-
                 int skipBytes = Math.max(0, bytesAvailable - prependBytes);
 
-                int useBytes = bytesAvailable - skipBytes;
-                long millis  = System.currentTimeMillis() - 1000 * useBytes / FILL_RATE;
-                final int flags = DateUtils.FORMAT_SHOW_TIME | DateUtils.FORMAT_SHOW_WEEKDAY | DateUtils.FORMAT_SHOW_DATE;
-                final String dateTime = DateUtils.formatDateTime(SaidItService.this, millis, flags);
-                String filename = "Echo - " + dateTime + ".wav";
-
-                File storageDir;
-                if(isExternalStorageWritable()){
-                    // Use public storage directory for Android 11+ (min SDK 30)
-                    storageDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Echo");
-                }else{
-                    storageDir = new File(getFilesDir(), "Echo");
-                }
-                final String storagePath = storageDir.getAbsolutePath();
-
-                String path = storagePath + "/" + filename;
-
-                wavFile = new File(path);
+                wavFile = newTempFile();
                 try {
                     wavFile.createNewFile();
                 } catch (IOException e) {
-                    filename = filename.replace(':', '.');
-                    path = storagePath + "/" + filename;
-                    wavFile = new File(path);
+                    Log.e(TAG, "Could not create temp file", e);
+                    state = STATE_LISTENING;
+                    return;
                 }
                 WavAudioFormat format = new WavAudioFormat.Builder().sampleRate(SAMPLE_RATE).build();
                 try {
                     wavFileWriter = new WavFileWriter(format, wavFile);
                 } catch (IOException e) {
-                    final String errorMessage = getString(R.string.cant_create_file) + path;
-                    Toast.makeText(SaidItService.this, errorMessage, Toast.LENGTH_LONG).show();
-                    Log.e(TAG, errorMessage, e);
+                    Toast.makeText(SaidItService.this,
+                            getString(R.string.cant_create_file) + wavFile.getAbsolutePath(),
+                            Toast.LENGTH_LONG).show();
+                    Log.e(TAG, "Can't create wav writer", e);
+                    state = STATE_LISTENING;
                     return;
                 }
 
-                final String finalPath = path;
-
-                if(skipBytes < bytesAvailable) {
+                if (skipBytes < bytesAvailable) {
                     try {
                         audioMemory.read(skipBytes, new AudioMemory.Consumer() {
                             @Override
@@ -336,15 +260,133 @@ public class SaidItService extends Service {
                             }
                         });
                     } catch (IOException e) {
-                        final String errorMessage = getString(R.string.error_during_writing_history_into) + finalPath;
-                        Toast.makeText(SaidItService.this, errorMessage, Toast.LENGTH_LONG).show();
-                        Log.e(TAG, errorMessage, e);
-                        stopRecording(new SaidItFragment.NotifyFileReceiver(SaidItService.this), "");
+                        Log.e(TAG, "Error writing prepended history", e);
+                        stopRecording();
                     }
                 }
             }
         });
+    }
 
+    /**
+     * Saves the last {@code memorySeconds} of the ring buffer to a file (without keeping recording).
+     */
+    public void dumpRecording(final float memorySeconds) {
+        if (state != STATE_LISTENING) {
+            Log.w(TAG, "dumpRecording ignored, not listening");
+            return;
+        }
+        final long whenMs = System.currentTimeMillis();
+        audioHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                flushAudioRecord();
+                int prependBytes = (int) (memorySeconds * FILL_RATE);
+                int bytesAvailable = audioMemory.countFilled();
+                int skipBytes = Math.max(0, bytesAvailable - prependBytes);
+
+                File temp = newTempFile();
+                WavAudioFormat format = new WavAudioFormat.Builder().sampleRate(SAMPLE_RATE).build();
+                try {
+                    if (!temp.exists() && !temp.createNewFile()) {
+                        throw new IOException("createFile failed");
+                    }
+                } catch (IOException e) {
+                    showToast(getString(R.string.cant_create_file) + temp.getAbsolutePath());
+                    return;
+                }
+                try (WavFileWriter writer = new WavFileWriter(format, temp)) {
+                    audioMemory.read(skipBytes, new AudioMemory.Consumer() {
+                        @Override
+                        public int consume(byte[] array, int offset, int count) throws IOException {
+                            writer.write(array, offset, count);
+                            return 0;
+                        }
+                    });
+                } catch (IOException e) {
+                    showToast(getString(R.string.error_during_writing_history_into) + temp.getAbsolutePath());
+                    Log.e(TAG, "Error writing dump", e);
+                    return;
+                }
+                publishSaved(temp, whenMs);
+            }
+        });
+    }
+
+    /** Stops the current recording and saves the temp file to the SAF folder. */
+    public void stopRecording() {
+        switch (state) {
+            case STATE_READY:
+            case STATE_LISTENING:
+                return;
+            case STATE_RECORDING:
+                break;
+        }
+        state = STATE_LISTENING;
+        cancelAutoStop();
+
+        final long whenMs = System.currentTimeMillis();
+        final File tempRef = wavFile;
+        final WavFileWriter writerRef = wavFileWriter;
+
+        audioHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (writerRef != null) {
+                    flushAudioRecord();
+                    try {
+                        writerRef.close();
+                    } catch (IOException e) {
+                        Log.e(TAG, "CLOSING ERROR", e);
+                    }
+                    if (tempRef != null) {
+                        publishSaved(tempRef, whenMs);
+                    }
+                }
+                wavFileWriter = null;
+                wavFile = null;
+            }
+        });
+
+        final SharedPreferences preferences = getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE);
+        preferences.edit().putBoolean(RECORDING_ACTIVE_KEY, false).commit();
+        if (!preferences.getBoolean(AUDIO_MEMORY_ENABLED_KEY, true)) {
+            innerStopListening();
+        }
+        stopForeground(true);
+    }
+
+    public boolean isRecording() {
+        return state == STATE_RECORDING;
+    }
+
+    /** Toggles between recording and not-recording (used by the volume shortcut). */
+    public void toggleRecording() {
+        if (state == STATE_RECORDING) {
+            stopRecording();
+        } else {
+            startRecording(0);
+        }
+    }
+
+    /** Copies the (already-closed) temp file to the SAF folder, posts a notification, deletes temp. */
+    private void publishSaved(final File temp, final long whenMs) {
+        if (temp == null || !temp.exists()) {
+            Log.w(TAG, "publishSaved: temp missing");
+            return;
+        }
+        final Uri savedUri = Storage.saveToTree(SaidItService.this, temp, whenMs);
+        final String displayName = Storage.buildFileName(whenMs);
+        if (savedUri != null) {
+            notifySaved(savedUri, displayName);
+            if (!temp.delete()) {
+                Log.w(TAG, "Could not delete temp file " + temp);
+            }
+        } else {
+            // No SAF folder (user hasn't picked one). Keep the temp file so audio isn't lost.
+            showToast(getString(R.string.pick_folder_to_save));
+            notifySavedFileProvider(temp);
+        }
     }
 
     public long getMemorySize() {
@@ -355,7 +397,7 @@ public class SaidItService extends Service {
         final SharedPreferences preferences = this.getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE);
         preferences.edit().putLong(AUDIO_MEMORY_SIZE_KEY, memorySize).commit();
 
-        if(preferences.getBoolean(AUDIO_MEMORY_ENABLED_KEY, true)) {
+        if (preferences.getBoolean(AUDIO_MEMORY_ENABLED_KEY, true)) {
             audioHandler.post(new Runnable() {
                 @Override
                 public void run() {
@@ -370,14 +412,13 @@ public class SaidItService extends Service {
     }
 
     public void setSampleRate(int sampleRate) {
-        switch(state) {
+        switch (state) {
             case STATE_READY:
             case STATE_RECORDING:
                 return;
             case STATE_LISTENING:
                 break;
         }
-
         final SharedPreferences preferences = this.getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE);
         preferences.edit().putInt(SAMPLE_RATE_KEY, sampleRate).commit();
 
@@ -387,104 +428,216 @@ public class SaidItService extends Service {
         innerStartListening();
     }
 
-    public interface WavFileReceiver {
-        public void fileReady(File file, float runtime);
+    public float getBytesToSeconds() {
+        return 1f / FILL_RATE;
     }
 
-    public void stopRecording(final WavFileReceiver wavFileReceiver, String newFileName) {
-        switch(state) {
-            case STATE_READY:
-            case STATE_LISTENING:
-                return;
-            case STATE_RECORDING:
-                break;
+    class BackgroundRecorderBinder extends Binder {
+        public SaidItService getService() {
+            return SaidItService.this;
         }
-        state = STATE_LISTENING;
+    }
 
-        audioHandler.post(new Runnable() {
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        startForeground(FOREGROUND_NOTIFICATION_ID, buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+
+        if (volumeMonitor != null) volumeMonitor.start();
+
+        final String action = intent != null ? intent.getAction() : null;
+        if (ACTION_AUTO_STOP.equals(action)) {
+            Log.d(TAG, "AUTO_STOP received");
+            if (state == STATE_RECORDING) {
+                stopRecording();
+            }
+            return START_STICKY;
+        }
+
+        // Resume a recording that was interrupted by the system killing / rebooting the device.
+        final SharedPreferences prefs = getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE);
+        if (prefs.getBoolean(RECORDING_ACTIVE_KEY, false) && state != STATE_RECORDING) {
+            Log.d(TAG, "Resuming recording after restart");
+            if (state == STATE_READY && prefs.getBoolean(AUDIO_MEMORY_ENABLED_KEY, true)) {
+                innerStartListening();
+            }
+            startRecording(0);
+        }
+
+        return START_STICKY;
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        // Restart the service shortly after the user swipes it away from recents,
+        // so background recording survives.
+        Intent restartServiceIntent = new Intent(getApplicationContext(), this.getClass());
+        restartServiceIntent.setPackage(getPackageName());
+
+        PendingIntent restartServicePendingIntent = PendingIntent.getService(this, 1,
+                restartServiceIntent,
+                PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        AlarmManager alarmService = (AlarmManager) getSystemService(ALARM_SERVICE);
+        alarmService.set(AlarmManager.ELAPSED_REALTIME,
+                SystemClock.elapsedRealtime() + 1000,
+                restartServicePendingIntent);
+    }
+
+    // ---- Auto-stop timer / hard limit ----
+
+    /**
+     * Schedules a single exact alarm at the earlier of (user timer, hard 70-min limit).
+     * If the user timer is off, only the hard limit is scheduled.
+     */
+    private void scheduleAutoStop(long startMs, int timerMinutes) {
+        final long hardLimitMs = MAX_RECORDING_MINUTES * 60_000L;
+        final long timerMs = timerMinutes > 0 ? timerMinutes * 60_000L : hardLimitMs;
+        final long stopAt = startMs + Math.min(timerMs, hardLimitMs);
+
+        Intent intent = new Intent(this, SaidItService.class).setAction(ACTION_AUTO_STOP);
+        PendingIntent pi = PendingIntent.getService(this, AUTO_STOP_REQUEST_CODE, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        try {
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, stopAt, pi);
+            Log.d(TAG, "Auto-stop scheduled at " + stopAt + " (timer=" + timerMinutes + "min)");
+        } catch (SecurityException e) {
+            Log.e(TAG, "Could not schedule exact alarm", e);
+        }
+    }
+
+    private void cancelAutoStop() {
+        Intent intent = new Intent(this, SaidItService.class).setAction(ACTION_AUTO_STOP);
+        PendingIntent pi = PendingIntent.getService(this, AUTO_STOP_REQUEST_CODE, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        am.cancel(pi);
+    }
+
+    // ---- Notifications ----
+
+    private Notification buildNotification() {
+        Intent intent = new Intent(this, SaidItActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
+
+        ensureChannel(CHANNEL_ID, "Recording", NotificationManager.IMPORTANCE_LOW);
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle(getString(R.string.recording))
+                .setSmallIcon(R.drawable.ic_stat_notify_recording)
+                .setTicker(getString(R.string.recording))
+                .setContentIntent(pendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(true)
+                .build();
+    }
+
+    private void notifySaved(Uri contentUri, String displayName) {
+        ensureChannel(CHANNEL_ID_SAVED, "Saved recordings", NotificationManager.IMPORTANCE_DEFAULT);
+        Intent view = new Intent(Intent.ACTION_VIEW);
+        view.setDataAndType(contentUri, "audio/wav");
+        view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        PendingIntent pi = PendingIntent.getActivity(this, 0, view,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification n = new NotificationCompat.Builder(this, CHANNEL_ID_SAVED)
+                .setContentTitle(getString(R.string.recording_saved))
+                .setContentText(displayName)
+                .setSmallIcon(R.drawable.ic_stat_notify_recorded)
+                .setTicker(displayName)
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .build();
+        if (NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            NotificationManagerCompat.from(this).notify(SAVED_NOTIFICATION_ID, n);
+        }
+    }
+
+    /** Fallback notification when no SAF folder is set: open the temp file via FileProvider. */
+    private void notifySavedFileProvider(File file) {
+        ensureChannel(CHANNEL_ID_SAVED, "Saved recordings", NotificationManager.IMPORTANCE_DEFAULT);
+        Intent view = new Intent(Intent.ACTION_VIEW);
+        Uri uri = androidx.core.content.FileProvider.getUriForFile(this,
+                getApplicationContext().getPackageName() + ".provider", file);
+        view.setDataAndType(uri, "audio/wav");
+        view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        PendingIntent pi = PendingIntent.getActivity(this, 0, view,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification n = new NotificationCompat.Builder(this, CHANNEL_ID_SAVED)
+                .setContentTitle(getString(R.string.recording_saved))
+                .setContentText(file.getName())
+                .setSmallIcon(R.drawable.ic_stat_notify_recorded)
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build();
+        if (NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            NotificationManagerCompat.from(this).notify(SAVED_NOTIFICATION_ID, n);
+        }
+    }
+
+    private void ensureChannel(String id, String name, int importance) {
+        NotificationChannel channel = new NotificationChannel(id, name, importance);
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.createNotificationChannel(channel);
+    }
+
+    private void showToast(final String message) {
+        mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                flushAudioRecord();
-                try {
-                    wavFileWriter.close();
-                } catch (IOException e) {
-                    Log.e(TAG, "CLOSING ERROR", e);
-                }
-                if(wavFileReceiver != null) {
-                    wavFileReceiver.fileReady(wavFile, wavFileWriter.getTotalSampleBytesWritten() * getBytesToSeconds());
-                }
-                wavFileWriter = null;
+                Toast.makeText(SaidItService.this, message, Toast.LENGTH_LONG).show();
             }
         });
-
-        final SharedPreferences preferences = this.getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE);
-        if(!preferences.getBoolean(AUDIO_MEMORY_ENABLED_KEY, true)) {
-            innerStopListening();
-        }
-
-        stopForeground(true);
     }
 
+    // ---- Audio capture loop (unchanged logic) ----
+
     private void flushAudioRecord() {
-        // Only allowed on the audio thread
-        assert audioHandler.getLooper() == Looper.myLooper();
-        audioHandler.removeCallbacks(audioReader); // remove any delayed callbacks
+        assert audioHandler.getLooper() == android.os.Looper.myLooper();
+        audioHandler.removeCallbacks(audioReader);
         audioReader.run();
     }
 
     final AudioMemory.Consumer filler = new AudioMemory.Consumer() {
         @Override
         public int consume(final byte[] array, final int offset, final int count) throws IOException {
-//            Log.d(TAG, "READING " + count + " B");
             final int read = audioRecord.read(array, offset, count, AudioRecord.READ_NON_BLOCKING);
-            if (read == AudioRecord.ERROR_BAD_VALUE) {
-                Log.e(TAG, "AUDIO RECORD ERROR - BAD VALUE");
-                return 0;
-            }
-            if (read == AudioRecord.ERROR_INVALID_OPERATION) {
-                Log.e(TAG, "AUDIO RECORD ERROR - INVALID OPERATION");
-                return 0;
-            }
-            if (read == AudioRecord.ERROR) {
-                Log.e(TAG, "AUDIO RECORD ERROR - UNKNOWN ERROR");
+            if (read == AudioRecord.ERROR_BAD_VALUE
+                    || read == AudioRecord.ERROR_INVALID_OPERATION
+                    || read == AudioRecord.ERROR) {
+                Log.e(TAG, "AUDIO RECORD ERROR: " + read);
                 return 0;
             }
             if (wavFileWriter != null && read > 0) {
                 wavFileWriter.write(array, offset, read);
             }
             if (read == count) {
-                // We've filled the buffer, so let's read again.
                 audioHandler.post(audioReader);
             } else {
-                // It seems we've read everything!
-                //
-                // Estimate how long do we have until audioRecord fills up completely and post the callback 1 second before that
-                // (but not earlier than half the buffer and no later than 90% of the buffer).
-                float bufferSizeInSeconds = audioRecord.getBufferSizeInFrames() / (float)SAMPLE_RATE;
-                float delaySeconds = bufferSizeInSeconds - 1;
-                delaySeconds = Math.max(delaySeconds, bufferSizeInSeconds * 0.5f);
+                float bufferSizeInSeconds = audioRecord.getBufferSizeInFrames() / (float) SAMPLE_RATE;
+                float delaySeconds = Math.max(bufferSizeInSeconds - 1, bufferSizeInSeconds * 0.5f);
                 delaySeconds = Math.min(delaySeconds, bufferSizeInSeconds * 0.9f);
-                audioHandler.postDelayed(audioReader, (long)(delaySeconds * 1000));
+                audioHandler.postDelayed(audioReader, (long) (delaySeconds * 1000));
             }
             return read;
         }
     };
+
     final Runnable audioReader = new Runnable() {
         @Override
         public void run() {
             try {
                 audioMemory.fill(filler);
             } catch (IOException e) {
-                final String errorMessage = getString(R.string.error_during_recording_into) + wavFile.getName();
-                Toast.makeText(SaidItService.this, errorMessage, Toast.LENGTH_LONG).show();
-                Log.e(TAG, errorMessage, e);
-                stopRecording(new SaidItFragment.NotifyFileReceiver(SaidItService.this), "");
+                showToast(getString(R.string.error_during_recording_into) + (wavFile != null ? wavFile.getName() : "?"));
+                Log.e(TAG, "Error during recording", e);
+                stopRecording();
             }
         }
     };
 
     public interface StateCallback {
-        public void state(boolean listeningEnabled, boolean recording, float memorized, float totalMemory, float recorded);
+        void state(boolean listeningEnabled, boolean recording, float memorized, float totalMemory, float recorded);
     }
 
     public void getState(final StateCallback stateCallback) {
@@ -492,15 +645,14 @@ public class SaidItService extends Service {
         final boolean listeningEnabled = preferences.getBoolean(AUDIO_MEMORY_ENABLED_KEY, true);
         final boolean recording = (state == STATE_RECORDING);
         final Handler sourceHandler = new Handler();
-        // Note that we may not run this for quite a while, if audioReader decides to read a lot of audio!
         audioHandler.post(new Runnable() {
             @Override
             public void run() {
                 flushAudioRecord();
                 final AudioMemory.Stats stats = audioMemory.getStats(FILL_RATE);
-                
+
                 int recorded = 0;
-                if(wavFileWriter != null) {
+                if (wavFileWriter != null) {
                     recorded += wavFileWriter.getTotalSampleBytesWritten();
                     recorded += stats.estimation;
                 }
@@ -518,59 +670,4 @@ public class SaidItService extends Service {
             }
         });
     }
-
-    public float getBytesToSeconds() {
-        return 1f / FILL_RATE;
-    }
-
-    class BackgroundRecorderBinder extends Binder {
-        public SaidItService getService() {
-            return SaidItService.this;
-        }
-    }
-
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        startForeground(FOREGROUND_NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
-        return START_STICKY;
-    }
-
-    // Workaround for bug where recent app removal caused service to stop
-    @Override
-    public void onTaskRemoved(Intent rootIntent) {
-        Intent restartServiceIntent = new Intent(getApplicationContext(), this.getClass());
-        restartServiceIntent.setPackage(getPackageName());
-
-        PendingIntent restartServicePendingIntent = PendingIntent.getService(this, 1, restartServiceIntent, PendingIntent.FLAG_ONE_SHOT| PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        AlarmManager alarmService = (AlarmManager) getSystemService(ALARM_SERVICE);
-        alarmService.set(
-                AlarmManager.ELAPSED_REALTIME,
-                SystemClock.elapsedRealtime() + 1000,
-                restartServicePendingIntent);
-    }
-
-    private Notification buildNotification() {
-        Intent intent = new Intent(this, SaidItActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
-
-        NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, YOUR_NOTIFICATION_CHANNEL_ID)
-                .setContentTitle(getString(R.string.recording))
-                .setSmallIcon(R.drawable.ic_stat_notify_recording)
-                .setTicker(getString(R.string.recording))
-                .setContentIntent(pendingIntent)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setOngoing(true); // Ensure notification is ongoing
-
-        // Create the notification channel
-        NotificationChannel channel = new NotificationChannel(
-                YOUR_NOTIFICATION_CHANNEL_ID,
-                "Recording Channel",
-                NotificationManager.IMPORTANCE_DEFAULT
-        );
-        NotificationManager notificationManager = getSystemService(NotificationManager.class);
-        notificationManager.createNotificationChannel(channel);
-
-        return notificationBuilder.build();
-    }
-
 }
