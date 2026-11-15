@@ -11,17 +11,25 @@ import android.os.Bundle;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 /**
  * Hosts the main recording fragment. Handles runtime permission requests and
- * forces the user to pick a SAF output folder on first launch (or if missing).
+ * offers a SAF output folder pick on first launch.
+ *
+ * Permissions are requested exactly once (in onCreate or after the user returns
+ * from settings). The SAF picker is offered once automatically and is never
+ * blocking — if the user cancels, the app still works and the folder can be set
+ * later in Settings.
  */
 public class SaidItActivity extends Activity {
 
     private static final int PERMISSION_REQUEST_CODE = 5465;
+
     private boolean isFragmentSet = false;
+    private boolean folderPrompted = false;
+    private boolean permissionRequested = false;
     private AlertDialog permissionDeniedDialog;
-    private AlertDialog folderDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,28 +38,31 @@ public class SaidItActivity extends Activity {
     }
 
     @Override
-    protected void onStart() {
-        super.onStart();
-        if (permissionDeniedDialog != null) permissionDeniedDialog.dismiss();
-        if (folderDialog != null) folderDialog.dismiss();
-        requestPermissions();
+    protected void onResume() {
+        super.onResume();
+        if (hasRecordAudioPermission()) {
+            showFragment();
+            ensureSafFolder();
+        } else if (!permissionRequested) {
+            permissionRequested = true;
+            requestPermissions();
+        } else if (permissionDeniedDialog == null || !permissionDeniedDialog.isShowing()) {
+            // Returned from settings without granting — re-prompt once.
+            showPermissionDeniedDialog();
+        }
     }
 
-    @Override
-    protected void onRestart() {
-        super.onRestart();
-        if (permissionDeniedDialog != null) permissionDeniedDialog.dismiss();
-        if (folderDialog != null) folderDialog.dismiss();
-        requestPermissions();
+    private boolean hasRecordAudioPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
     }
 
     private void requestPermissions() {
-        String[] permissions = {
+        ActivityCompat.requestPermissions(this, new String[]{
                 Manifest.permission.RECORD_AUDIO,
                 Manifest.permission.FOREGROUND_SERVICE,
                 Manifest.permission.POST_NOTIFICATIONS
-        };
-        ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE);
+        }, PERMISSION_REQUEST_CODE);
     }
 
     @Override
@@ -59,15 +70,7 @@ public class SaidItActivity extends Activity {
                                            @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode != PERMISSION_REQUEST_CODE) return;
-
-        boolean allGranted = true;
-        for (int r : grantResults) {
-            if (r != PackageManager.PERMISSION_GRANTED) {
-                allGranted = false;
-                break;
-            }
-        }
-        if (allGranted) {
+        if (hasRecordAudioPermission()) {
             showFragment();
             ensureSafFolder();
         } else {
@@ -76,16 +79,17 @@ public class SaidItActivity extends Activity {
     }
 
     private void showFragment() {
-        if (!isFragmentSet) {
-            isFragmentSet = true;
-            getFragmentManager().beginTransaction()
-                    .replace(R.id.container, new SaidItFragment(), "main-fragment")
-                    .commit();
-        }
+        if (isFragmentSet) return;
+        isFragmentSet = true;
+        getFragmentManager().beginTransaction()
+                .replace(R.id.container, new SaidItFragment(), "main-fragment")
+                .commit();
     }
 
     private void ensureSafFolder() {
+        if (folderPrompted) return;
         if (Storage.hasTreeUri(this)) return;
+        folderPrompted = true;
         Storage.openTreePicker(this);
     }
 
@@ -93,31 +97,12 @@ public class SaidItActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == Storage.REQUEST_CODE_OPEN_TREE) {
-            boolean ok = resultCode == RESULT_OK && Storage.takeTreeUri(this, data);
-            if (!ok) {
-                showFolderRequiredDialog();
+            if (resultCode == RESULT_OK) {
+                Storage.takeTreeUri(this, data);
             }
+            // If cancelled, the app still works (falls back to internal storage);
+            // the user can pick a folder later in Settings.
         }
-    }
-
-    private void showFolderRequiredDialog() {
-        folderDialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.folder_required)
-                .setMessage(R.string.folder_required_message)
-                .setPositiveButton(R.string.allow, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        Storage.openTreePicker(SaidItActivity.this);
-                    }
-                })
-                .setNegativeButton(R.string.exit, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        finish();
-                    }
-                })
-                .setCancelable(false)
-                .show();
     }
 
     private void showPermissionDeniedDialog() {

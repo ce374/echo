@@ -442,8 +442,17 @@ public class SaidItService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startForeground(FOREGROUND_NOTIFICATION_ID, buildNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+        // Promote to a foreground microphone service. On Android 14+ this can
+        // throw ForegroundServiceStartNotAllowedException when started from the
+        // background (e.g. the onTaskRemoved restart alarm or a cold boot). We
+        // catch it so the process never crashes; START_STICKY will let the
+        // system restart us from an exempted context.
+        try {
+            startForeground(FOREGROUND_NOTIFICATION_ID, buildNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+        } catch (Throwable t) {
+            Log.e(TAG, "startForeground failed: " + t);
+        }
 
         if (volumeMonitor != null) volumeMonitor.start();
 

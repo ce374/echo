@@ -30,8 +30,8 @@ android {
         applicationId "eu.mrogalski.saidit"
         minSdk 30
         targetSdk 34
-        versionCode 16
-        versionName "2.1.0"
+        versionCode 17
+        versionName "2.1.1"
     }
 
     signingConfigs {

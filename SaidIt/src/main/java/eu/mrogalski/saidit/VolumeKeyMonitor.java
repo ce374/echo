@@ -9,19 +9,25 @@ import android.provider.Settings;
 import android.util.Log;
 
 /**
- * Detects 5 volume-up presses within a short window and fires a trigger.
+ * Detects 5 volume-up presses within a short window and fires a trigger that
+ * toggles recording.
  *
- * Works while the screen is locked because a foreground service keeps the
- * observer registered: when the screen is off the volume keys adjust the
- * ring stream, and when media is playing they adjust the music stream, so
- * both are watched. Only increases are counted, so the user's volume is
- * never modified by this monitor (minimal disruption, minimal battery).
+ * Reliability technique: after each detected up-press, the stream's volume is
+ * decremented back to its previous value (guarded by {@code selfChange} so the
+ * reset itself is not counted). This guarantees that every volume-up press
+ * registers as an increase — even when the user is not at maximum volume and
+ * even when the screen is locked (where volume keys adjust the ring stream).
+ * Without this reset, presses at or near max volume produce no observable
+ * change and the shortcut silently fails.
+ *
+ * Battery: this only runs while the recording service is already in the
+ * foreground, and the work per change event is trivial.
  */
 public final class VolumeKeyMonitor {
 
     private static final String TAG = "VolumeKeyMonitor";
     private static final int REQUIRED_PRESSES = 5;
-    private static final long WINDOW_MS = 2500;
+    private static final long WINDOW_MS = 3000;
 
     public interface Trigger {
         void onVolumeShortcut();
@@ -36,6 +42,7 @@ public final class VolumeKeyMonitor {
     private int lastRing;
     private int presses;
     private boolean registered;
+    private boolean selfChange;
 
     private final Runnable resetPresses = new Runnable() {
         @Override
@@ -50,6 +57,7 @@ public final class VolumeKeyMonitor {
     private final ContentObserver observer = new ContentObserver(new Handler(Looper.getMainLooper())) {
         @Override
         public void onChange(boolean selfChange) {
+            // Android passes its own selfChange flag here; ignore it and use ours.
             handleVolumeChange();
         }
     };
@@ -66,6 +74,7 @@ public final class VolumeKeyMonitor {
         lastMusic = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
         lastRing = audio.getStreamVolume(AudioManager.STREAM_RING);
         presses = 0;
+        selfChange = false;
         try {
             context.getContentResolver().registerContentObserver(
                     Settings.System.getUriFor("volume_music"), false, observer);
@@ -87,21 +96,47 @@ public final class VolumeKeyMonitor {
         handler.removeCallbacks(resetPresses);
         registered = false;
         presses = 0;
+        selfChange = false;
     }
 
     private void handleVolumeChange() {
         if (!registered) return;
-        final int music = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
-        final int ring = audio.getStreamVolume(AudioManager.STREAM_RING);
-        final boolean musicUp = music > lastMusic;
-        final boolean ringUp = ring > lastRing;
-        lastMusic = music;
-        lastRing = ring;
-        if (!musicUp && !ringUp) {
-            // a decrease or no net change; restart the window
-            presses = 0;
+
+        // Ignore the change event triggered by our own setStreamVolume reset.
+        if (selfChange) {
+            selfChange = false;
             return;
         }
+
+        final int music = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+        final int ring = audio.getStreamVolume(AudioManager.STREAM_RING);
+
+        final boolean musicUp = music > lastMusic;
+        final boolean ringUp = ring > lastRing;
+
+        if (musicUp) {
+            registerPress();
+            // Reset music back down so the next up-press registers again.
+            selfChange = true;
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(music - 1, 0), 0);
+            lastMusic = Math.max(music - 1, 0);
+            lastRing = ring;
+        } else if (ringUp) {
+            registerPress();
+            // Reset ring back down so the next up-press registers again.
+            selfChange = true;
+            audio.setStreamVolume(AudioManager.STREAM_RING, Math.max(ring - 1, 0), 0);
+            lastRing = Math.max(ring - 1, 0);
+            lastMusic = music;
+        } else {
+            // A decrease or no net change — restart the window.
+            lastMusic = music;
+            lastRing = ring;
+            presses = 0;
+        }
+    }
+
+    private void registerPress() {
         presses++;
         Log.d(TAG, "volume-up detected, count=" + presses);
         handler.removeCallbacks(resetPresses);
@@ -109,6 +144,7 @@ public final class VolumeKeyMonitor {
         if (presses >= REQUIRED_PRESSES) {
             presses = 0;
             handler.removeCallbacks(resetPresses);
+            Log.d(TAG, "triggering shortcut");
             trigger.onVolumeShortcut();
         }
     }
