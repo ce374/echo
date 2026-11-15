@@ -81,6 +81,54 @@ public final class Storage {
         return "Echo_" + stamp + ".wav";
     }
 
+    /** Builds a datetime-stamped filename for a recovered recording. */
+    public static String buildRecoveredFileName(long whenMs) {
+        final String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date(whenMs));
+        return "Echo_recovered_" + stamp + ".wav";
+    }
+
+    /**
+     * Saves a temp WAV left behind by a crashed/killed recording. The writer
+     * never closed cleanly, so the RIFF size header is patched from the actual
+     * file length before copying to the SAF folder. Returns the saved Uri, or
+     * null on failure.
+     */
+    public static Uri saveOrphanedTemp(Context context, File temp, long whenMs) {
+        if (temp == null || !temp.exists() || temp.length() < 44) return null;
+        try {
+            simplesound.pcm.PcmAudioHelper.modifyRiffSizeData(temp, (int) (temp.length() - 44));
+        } catch (IOException e) {
+            Log.w(TAG, "Could not patch orphaned wav header", e);
+        }
+        Uri treeUri = getTreeUri(context);
+        if (treeUri == null) {
+            Log.w(TAG, "No SAF tree; orphaned temp left at " + temp);
+            return null;
+        }
+        DocumentFile tree = DocumentFile.fromTreeUri(context, treeUri);
+        if (tree == null || !tree.canWrite()) return null;
+        final String name = buildRecoveredFileName(whenMs);
+        DocumentFile file = tree.createFile("audio/wav", name);
+        if (file == null) return null;
+        OutputStream out = null;
+        FileInputStream in = null;
+        try {
+            out = context.getContentResolver().openOutputStream(file.getUri());
+            in = new FileInputStream(temp);
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+            out.flush();
+            return file.getUri();
+        } catch (IOException e) {
+            Log.e(TAG, "Could not copy orphaned temp", e);
+            return null;
+        } finally {
+            try { if (in != null) in.close(); } catch (IOException ignored) {}
+            try { if (out != null) out.close(); } catch (IOException ignored) {}
+        }
+    }
+
     /**
      * Creates a new .wav document inside the stored tree and copies the contents of
      * {@code tempFile} into it. Returns the Uri of the created document, or null on failure.

@@ -45,6 +45,49 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:tag="bold"
+            android:text="@string/volume_shortcut_label" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/volume_shortcut_status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/volume_shortcut_off" />
+
+            <Button
+                android:id="@+id/volume_shortcut_enable"
+                style="@style/Button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/volume_shortcut_enable" />
+        </LinearLayout>
+
+        <Switch
+            android:id="@+id/low_battery_switch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/low_battery_label"
+            android:checked="true" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="20dp"
+            android:background="@color/gray_d" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:tag="bold"
             android:text="@string/timer_label" />
 
         <LinearLayout

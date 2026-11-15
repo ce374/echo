@@ -19,6 +19,9 @@ public class SaidIt {
     /** User-settable auto-stop timer in minutes (0 = off). */
     static final String TIMER_MINUTES_KEY = "timer_minutes";
 
+    /** When true, a low-battery broadcast stops and saves the current recording. */
+    static final String LOW_BATTERY_AUTOSAVE_KEY = "low_battery_autosave";
+
     /** Hard cap for any single recording, in minutes. */
     static final int MAX_RECORDING_MINUTES = 70;
 

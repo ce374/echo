@@ -16,11 +16,14 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
+import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import androidx.documentfile.provider.DocumentFile;
@@ -82,6 +85,37 @@ public class SettingsActivity extends Activity {
         highlightButtons();
         updateFolderDisplay();
         updateTimerHighlight();
+        updateLowBatterySwitch();
+        updateAccessibilityStatus();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // The user may have just enabled/disabled the accessibility service.
+        updateAccessibilityStatus();
+    }
+
+    private void updateLowBatterySwitch() {
+        Switch sw = (Switch) findViewById(R.id.low_battery_switch);
+        if (sw == null) return;
+        boolean on = getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE)
+                .getBoolean(SaidIt.LOW_BATTERY_AUTOSAVE_KEY, true);
+        if (sw.isChecked() != on) sw.setChecked(on);
+    }
+
+    static boolean isAccessibilityEnabled(Context context) {
+        String enabled = Settings.Secure.getString(context.getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        return enabled != null
+                && enabled.contains(EchoAccessibilityService.class.getName());
+    }
+
+    private void updateAccessibilityStatus() {
+        TextView tv = (TextView) findViewById(R.id.volume_shortcut_status);
+        if (tv == null) return;
+        tv.setText(isAccessibilityEnabled(this) ? R.string.volume_shortcut_on
+                : R.string.volume_shortcut_off);
     }
 
     void highlightButtons() {
@@ -125,6 +159,9 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Block screenshots, screen recording and casting of this app.
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE);
 
         final AssetManager assets = getAssets();
         final Resources resources = getResources();
@@ -186,6 +223,26 @@ public class SettingsActivity extends Activity {
             @Override
             public void onClick(View v) {
                 Storage.openTreePicker(SettingsActivity.this);
+            }
+        });
+
+        // Low-battery auto-save toggle.
+        final Switch lowBattery = (Switch) root.findViewById(R.id.low_battery_switch);
+        lowBattery.setChecked(getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE)
+                .getBoolean(SaidIt.LOW_BATTERY_AUTOSAVE_KEY, true));
+        lowBattery.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(android.widget.CompoundButton button, boolean isChecked) {
+                getSharedPreferences(SaidIt.PACKAGE_NAME, MODE_PRIVATE)
+                        .edit().putBoolean(SaidIt.LOW_BATTERY_AUTOSAVE_KEY, isChecked).commit();
+            }
+        });
+
+        // Volume-key shortcut: open system Accessibility settings to enable the service.
+        root.findViewById(R.id.volume_shortcut_enable).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
             }
         });
 

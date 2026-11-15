@@ -45,7 +45,7 @@ public class PcmAudioHelper {
      * @param size    size to replace the header.
      * @throws IOException if an error occurs whule accesing the data.
      */
-    static void modifyRiffSizeData(File wavFile, int size) throws IOException {
+    public static void modifyRiffSizeData(File wavFile, int size) throws IOException {
         RandomAccessFile raf = new RandomAccessFile(wavFile, "rw");
         raf.seek(RiffHeaderData.RIFF_CHUNK_SIZE_INDEX);
         raf.write(toByteArray(size + 36, false));

@@ -20,6 +20,7 @@ import android.os.Binder;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.StatFs;
 import android.os.SystemClock;
 import android.util.Log;
 import android.widget.Toast;
@@ -79,9 +80,34 @@ public class SaidItService extends Service {
             }
         });
 
+        // If the previous process was killed mid-recording, save the orphaned
+        // temp file to the SAF folder before anything overwrites it.
+        audioHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                recoverCrashedRecording();
+            }
+        });
+
         if (preferences.getBoolean(AUDIO_MEMORY_ENABLED_KEY, true)) {
             innerStartListening();
         }
+    }
+
+    /** Saves a temp WAV left behind by a crashed/killed recording. */
+    private void recoverCrashedRecording() {
+        final SharedPreferences prefs = getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE);
+        if (!prefs.getBoolean(RECORDING_ACTIVE_KEY, false)) return;
+        final File temp = newTempFile();
+        if (!temp.exists() || temp.length() < 44) return;
+        Log.d(TAG, "Recovering crashed recording: " + temp.length() + " bytes");
+        final long whenMs = System.currentTimeMillis();
+        final Uri saved = Storage.saveOrphanedTemp(SaidItService.this, temp, whenMs);
+        if (saved != null) {
+            showToast(getString(R.string.recovered_recording_saved));
+            notifySaved(saved, Storage.buildRecoveredFileName(whenMs));
+        }
+        if (!temp.delete()) Log.w(TAG, "Could not delete recovered temp");
     }
 
     @Override
@@ -199,6 +225,16 @@ public class SaidItService extends Service {
         return new File(tempDir(), "echo_recording.wav");
     }
 
+    /** Free bytes on the filesystem holding the given directory. */
+    private static long availableBytes(File dir) {
+        try {
+            StatFs stat = new StatFs(dir.getAbsolutePath());
+            return stat.getAvailableBytes();
+        } catch (Exception e) {
+            return Long.MAX_VALUE; // assume fine if we can't tell
+        }
+    }
+
     /**
      * Starts a continuous recording, optionally prepending the last {@code prependedMemorySeconds}
      * from the ring buffer. Output goes to a temp file; on stop it is copied to the SAF folder.
@@ -228,6 +264,14 @@ public class SaidItService extends Service {
             @Override
             public void run() {
                 flushAudioRecord();
+
+                // Refuse to start if there is nowhere to write.
+                if (availableBytes(tempDir()) < 5L * 1024 * 1024) {
+                    showToast(getString(R.string.storage_full));
+                    state = STATE_LISTENING;
+                    return;
+                }
+
                 int prependBytes = (int) (prependedMemorySeconds * FILL_RATE);
                 int bytesAvailable = audioMemory.countFilled();
                 int skipBytes = Math.max(0, bytesAvailable - prependBytes);
@@ -464,6 +508,11 @@ public class SaidItService extends Service {
             }
             return START_STICKY;
         }
+        if (ACTION_TOGGLE.equals(action)) {
+            Log.d(TAG, "TOGGLE received");
+            toggleRecording();
+            return START_STICKY;
+        }
 
         // Resume a recording that was interrupted by the system killing / rebooting the device.
         final SharedPreferences prefs = getSharedPreferences(PACKAGE_NAME, MODE_PRIVATE);
@@ -640,8 +689,9 @@ public class SaidItService extends Service {
             try {
                 audioMemory.fill(filler);
             } catch (IOException e) {
-                showToast(getString(R.string.error_during_recording_into) + (wavFile != null ? wavFile.getName() : "?"));
-                Log.e(TAG, "Error during recording", e);
+                // Most likely the storage is full. Save whatever was captured so far.
+                Log.e(TAG, "Write error (likely full storage)", e);
+                showToast(getString(R.string.storage_error_saved));
                 stopRecording();
             }
         }
