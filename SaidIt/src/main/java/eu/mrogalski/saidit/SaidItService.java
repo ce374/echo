@@ -33,6 +33,8 @@ import java.io.IOException;
 import simplesound.pcm.WavAudioFormat;
 import simplesound.pcm.WavFileWriter;
 
+import static eu.mrogalski.saidit.SaidIt.*;
+
 public class SaidItService extends Service {
     static final String TAG = SaidItService.class.getSimpleName();
     private static final int FOREGROUND_NOTIFICATION_ID = 458;

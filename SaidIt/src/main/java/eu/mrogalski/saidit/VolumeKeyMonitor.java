@@ -68,9 +68,9 @@ public final class VolumeKeyMonitor {
         presses = 0;
         try {
             context.getContentResolver().registerContentObserver(
-                    Settings.System.getUriFor(Settings.System.VOLUME_MUSIC), false, observer);
+                    Settings.System.getUriFor("volume_music"), false, observer);
             context.getContentResolver().registerContentObserver(
-                    Settings.System.getUriFor(Settings.System.VOLUME_RING), false, observer);
+                    Settings.System.getUriFor("volume_ring"), false, observer);
         } catch (Exception e) {
             Log.e(TAG, "Failed to register volume observer", e);
             return;
